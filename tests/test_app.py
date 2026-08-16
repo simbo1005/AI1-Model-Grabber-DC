@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -55,6 +56,9 @@ def test_catalog_contains_installers_but_no_product_workflows() -> None:
             assert file_spec["size_bytes"] > 0
             assert len(file_spec["sha256"]) == 64
             assert file_spec["auth"] in {"none", "huggingface"}
+            assert launcher_app.filename_from_url(file_spec["url"]) == (
+                Path(file_spec["destination"]).name
+            )
 
 
 def test_krea_2_installer_matches_the_runpod_manifest() -> None:
@@ -182,6 +186,21 @@ def test_huggingface_auth_can_use_baked_token_file(
 
     assert url.endswith("model.safetensors")
     assert headers["Authorization"] == "Bearer hf_test_only"
+
+
+def test_wget_command_uses_resumable_native_downloads(tmp_path) -> None:
+    command = launcher_app.wget_command(
+        "https://huggingface.co/example/model/resolve/main/model.safetensors",
+        {"Authorization": "Bearer hf_test_only"},
+        destination_dir=tmp_path,
+        resume=True,
+    )
+
+    assert command[:2] == ["wget", "--no-verbose"]
+    assert "--continue" in command
+    assert f"--directory-prefix={tmp_path}" in command
+    assert "--header=Authorization: Bearer hf_test_only" in command
+    assert command[-1].endswith("model.safetensors")
 
 
 def test_frontend_is_served() -> None:
