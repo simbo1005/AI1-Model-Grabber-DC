@@ -490,8 +490,8 @@ def wget_command(
     return command
 
 
-def huggingface_file_reference(url: str) -> tuple[str, str, str] | None:
-    """Return (repo_id, revision, filename) for a Hub /resolve/ URL."""
+def huggingface_file_reference(url: str) -> tuple[str, str, str, str] | None:
+    """Return (repo_id, repo_type, revision, filename) for a Hub /resolve/ URL."""
     parts = urlsplit(url)
     hostname = (parts.hostname or "").lower()
     if hostname != "huggingface.co" and not hostname.endswith(".huggingface.co"):
@@ -503,8 +503,16 @@ def huggingface_file_reference(url: str) -> tuple[str, str, str] | None:
         return None
     if resolve_index < 2 or len(segments) <= resolve_index + 2:
         return None
+    repo_type = "model"
+    repo_segments = segments[:resolve_index]
+    if repo_segments[0] in {"datasets", "spaces"}:
+        repo_type = repo_segments[0][:-1]
+        repo_segments = repo_segments[1:]
+    if len(repo_segments) != 2:
+        return None
     return (
-        "/".join(segments[:resolve_index]),
+        "/".join(repo_segments),
+        repo_type,
         segments[resolve_index + 1],
         "/".join(segments[resolve_index + 2 :]),
     )
@@ -1413,7 +1421,7 @@ class JobController:
 
     async def _download_file_with_hf_xet(
         self,
-        reference: tuple[str, str, str],
+        reference: tuple[str, str, str, str],
         name: str,
         destination: Path,
         partial: Path,
@@ -1428,7 +1436,7 @@ class JobController:
         requires_token: bool,
     ) -> int:
         """Download Hub files with Xet's adaptive parallel transfer engine."""
-        repo_id, revision, filename = reference
+        repo_id, repo_type, revision, filename = reference
         staging_dir = destination.parent / ".dsnn-hf-downloads"
         staging_dir.mkdir(parents=True, exist_ok=True)
         token = huggingface_token() if requires_token else None
@@ -1443,6 +1451,7 @@ class JobController:
         downloaded = await asyncio.to_thread(
             hf_hub_download,
             repo_id=repo_id,
+            repo_type=repo_type,
             filename=filename,
             revision=revision,
             token=token,
