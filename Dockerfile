@@ -40,6 +40,37 @@ RUN python3.12 -m pip install \
     && mv /start.sh /usr/local/bin/runpod-base-start.sh \
     && chmod +x /usr/local/bin/runpod-base-start.sh
 
+# Warm the dependencies shared by the pinned custom nodes.  The constraints are
+# captured from the RunPod base image so this layer cannot replace its CUDA Torch
+# build with a CPU wheel.  Node requirements still run at install time as a safe
+# fallback when a catalog entry changes.
+COPY docker/custom-node-requirements.txt /tmp/custom-node-requirements.txt
+RUN set -eu; \
+    python3.12 -m pip freeze \
+      | grep -iE '^(torch|torchvision|torchaudio|numpy|transformers|pillow|opencv-[a-z-]+)==' \
+      > /tmp/dsnn-constraints.txt; \
+    python3.12 -m pip install --break-system-packages --no-cache-dir \
+      -c /tmp/dsnn-constraints.txt -r /tmp/custom-node-requirements.txt; \
+    expected="$(sed -n 's/^[Tt]orch==//p' /tmp/dsnn-constraints.txt)"; \
+    actual="$(python3.12 -c 'import torch; print(torch.__version__)')"; \
+    test -n "$expected"; \
+    test "$actual" = "$expected"; \
+    rm /tmp/custom-node-requirements.txt /tmp/dsnn-constraints.txt
+
+# dlib is source-only and is required by ComfyUI_FaceAnalysis.  Build it once
+# here instead of making a rented Pod compile C++ during a workflow install.
+RUN set -eu; \
+    added_toolchain=0; \
+    if ! command -v c++ >/dev/null 2>&1; then \
+      apt-get update; apt-get install -y --no-install-recommends build-essential; added_toolchain=1; \
+    fi; \
+    export MAKEFLAGS=-j4 CMAKE_BUILD_PARALLEL_LEVEL=4; \
+    python3.12 -m pip install --break-system-packages --no-cache-dir cmake 'dlib==20.0.1'; \
+    python3.12 -c 'import dlib; print(dlib.__version__)'; \
+    python3.12 -m pip uninstall -y cmake; \
+    if [ "$added_toolchain" = 1 ]; then apt-get purge -y build-essential && apt-get autoremove -y; fi; \
+    rm -rf /var/lib/apt/lists/*
+
 COPY launcher/ /opt/dsnn/launcher/
 COPY catalog/ /opt/dsnn/catalog/
 COPY docker/entrypoint.sh /start.sh
