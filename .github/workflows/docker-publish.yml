@@ -31,6 +31,9 @@ jobs:
           python -m pip install -r requirements-launcher.txt pytest
           python -m pytest
 
+      - name: Audit custom-node requirements
+        run: python scripts/audit_node_requirements.py
+
       - name: Free runner disk space
         run: |
           echo "Disk space before cleanup:"
