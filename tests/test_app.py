@@ -225,6 +225,32 @@ def test_huggingface_file_reference_parses_resolve_urls() -> None:
     ) is None
 
 
+def test_pip_build_isolation_retry_is_only_used_for_missing_backends() -> None:
+    assert launcher_app.needs_build_isolation("ModuleNotFoundError: No module named 'cmake'")
+    assert not launcher_app.needs_build_isolation("Read timed out while fetching a wheel")
+    assert not launcher_app.needs_build_isolation("A package version conflict occurred")
+
+
+def test_diagnostics_are_redacted_and_human_readable() -> None:
+    controller = launcher_app.JobController()
+    controller.record_diagnostic(
+        "download",
+        "https://token@example.test/private/model at /workspace/secret",
+        time.monotonic() - 2,
+    )
+    previous = launcher_app.controller
+    launcher_app.controller = controller
+    try:
+        with TestClient(launcher_app.app) as client:
+            report = client.get("/api/diagnostics/report")
+            assert report.status_code == 200
+            assert "example.test" not in report.text
+            assert "/workspace" not in report.text
+            assert "download:" in report.text
+    finally:
+        launcher_app.controller = previous
+
+
 def test_frontend_is_served() -> None:
     with TestClient(launcher_app.app) as client:
         response = client.get("/")
@@ -911,7 +937,20 @@ def test_comfyui_update_uses_official_master_and_runtime_python(
 
     asyncio.run(controller._update_comfyui())
 
-    assert commands == [
+    assert commands[:6] == [
+        (
+            "git",
+            "-C",
+            str(comfy_dir),
+            "rev-parse",
+            "HEAD",
+        ),
+        (
+            "git",
+            "ls-remote",
+            launcher_app.COMFYUI_UPSTREAM,
+            "refs/heads/master",
+        ),
         (
             "git",
             "-C",
@@ -939,11 +978,47 @@ def test_comfyui_update_uses_official_master_and_runtime_python(
             "origin/master",
         ),
         (
+            "git",
+            "-C",
+            str(comfy_dir),
+            "rev-parse",
+            "HEAD",
+        ),
+    ]
+    assert commands[6:] == [
+        (
             str(comfy_python),
             "-m",
             "pip",
             "install",
+            "--disable-pip-version-check",
+            "--timeout",
+            "30",
+            "--retries",
+            "3",
             "-r",
             str(comfy_dir / "requirements.txt"),
         ),
     ]
+
+
+def test_comfyui_update_skips_when_the_installed_commit_is_current(tmp_path, monkeypatch) -> None:
+    comfy_dir = tmp_path / "ComfyUI"
+    (comfy_dir / ".git").mkdir(parents=True)
+    current = "a" * 40
+    controller = launcher_app.JobController()
+    commands: list[tuple[str, ...]] = []
+
+    async def fake_process(*command) -> tuple[int, str]:
+        commands.append(tuple(str(part) for part in command))
+        if "ls-remote" in command:
+            return 0, f"{current}\trefs/heads/master\n"
+        return 0, current + "\n"
+
+    monkeypatch.setattr(launcher_app, "COMFYUI_DIR", comfy_dir)
+    monkeypatch.setattr(controller, "_run_process", fake_process)
+
+    asyncio.run(controller._update_comfyui())
+
+    assert len(commands) == 2
+    assert controller.state.message == "ComfyUI is already current — update skipped."
