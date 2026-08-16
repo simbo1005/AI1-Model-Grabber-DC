@@ -203,6 +203,19 @@ def test_wget_command_uses_resumable_native_downloads(tmp_path) -> None:
     assert command[-1].endswith("model.safetensors")
 
 
+def test_huggingface_file_reference_parses_resolve_urls() -> None:
+    assert launcher_app.huggingface_file_reference(
+        "https://huggingface.co/Comfy-Org/example/resolve/main/models/model.safetensors"
+    ) == (
+        "Comfy-Org/example",
+        "main",
+        "models/model.safetensors",
+    )
+    assert launcher_app.huggingface_file_reference(
+        "https://example.com/owner/model/resolve/main/file"
+    ) is None
+
+
 def test_frontend_is_served() -> None:
     with TestClient(launcher_app.app) as client:
         response = client.get("/")
