@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from huggingface_hub import hf_hub_download
 from pydantic import BaseModel
@@ -75,6 +75,27 @@ DEFAULT_MODEL_FOLDERS = (
 
 class InstallCancelled(Exception):
     pass
+
+
+class ProcessTimedOut(RuntimeError):
+    """A bounded installer subprocess did not finish in time."""
+
+
+COMFYUI_UPSTREAM = "https://github.com/Comfy-Org/ComfyUI.git"
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+_NETWORK_FAILURE_MARKERS = (
+    "read timed out",
+    "connection",
+    "name resolution",
+    "network is unreachable",
+    "max retries exceeded",
+)
+_MISSING_BUILD_BACKEND_MARKERS = (
+    "no module named",
+    "modulenotfounderror",
+    "cmake must be installed",
+    "cmake is not installed",
+)
 
 
 @dataclass
@@ -526,6 +547,37 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def needs_build_isolation(output: str) -> bool:
+    """Only retry without isolation when the failure names a missing backend."""
+    lowered = output.lower()
+    return not any(marker in lowered for marker in _NETWORK_FAILURE_MARKERS) and any(
+        marker in lowered for marker in _MISSING_BUILD_BACKEND_MARKERS
+    )
+
+
+def process_timeout(command: tuple[str | Path, ...]) -> float:
+    """Bound network and package-manager operations without penalising normal work."""
+    values = tuple(str(part) for part in command)
+    if "pip" in values:
+        return 1800
+    if values and values[0] == "git":
+        return 60 if any(part in {"remote", "cat-file", "rev-parse"} for part in values) else 600
+    return 600
+
+
+def safe_diagnostic_text(value: str) -> str:
+    """Keep diagnostics useful without retaining URLs, paths, or credentials."""
+    value = re.sub(r"https?://\S+", "[url]", value)
+    value = re.sub(r"(?<!\w)/\S+", "[path]", value)
+    return value[:180]
+
+
+def human_seconds(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    minutes, remainder = divmod(seconds, 60)
+    return f"{minutes}m {remainder}s" if minutes else f"{remainder}s"
+
+
 class CustomModelController:
     def __init__(self) -> None:
         self.items: dict[str, CustomModelState] = {}
@@ -773,21 +825,38 @@ class CustomNodeController:
             setattr(item, key, value)
         item.updated_at = utc_now()
 
-    async def _origin_url(self, destination: Path) -> str:
+    async def _run_process(self, *command: str | Path) -> tuple[int, str]:
+        """Bound custom-node commands so a stalled network operation cannot hang forever."""
         process = await asyncio.create_subprocess_exec(
+            *(str(part) for part in command),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            output, _ = await asyncio.wait_for(process.communicate(), process_timeout(command))
+        except asyncio.TimeoutError:
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+            raise ProcessTimedOut(f"Command timed out after {human_seconds(process_timeout(command))}.")
+        return process.returncode or 0, output.decode(errors="replace")
+
+    async def _origin_url(self, destination: Path) -> str:
+        returncode, output = await self._run_process(
             "git",
             "-C",
             str(destination),
             "remote",
             "get-url",
             "origin",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
         )
-        output, _ = await process.communicate()
-        if process.returncode:
+        if returncode:
             return ""
-        return output.decode(errors="replace").strip()
+        return output.strip()
 
     async def _run_item(self, item: CustomNodeState) -> None:
         staging: Path | None = None
@@ -834,21 +903,18 @@ class CustomNodeController:
                 message=f"Cloning {item.name}...",
                 percent=12,
             )
-            process = await asyncio.create_subprocess_exec(
+            returncode, output = await self._run_process(
                 "git",
                 "clone",
                 "--filter=blob:none",
                 "--single-branch",
                 item.url,
                 str(staging),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
             )
-            output, _ = await process.communicate()
-            if process.returncode:
+            if returncode:
                 raise RuntimeError(
                     "Git could not clone this custom node: "
-                    f"{output.decode(errors='replace')[-500:]}"
+                    f"{output[-500:]}"
                 )
 
             self.update(item, percent=74, message="Repository cloned.")
@@ -863,21 +929,28 @@ class CustomNodeController:
                 python = COMFYUI_VENV / "bin" / "python"
                 if not python.exists():
                     python = Path(sys.executable)
-                process = await asyncio.create_subprocess_exec(
-                    str(python),
+                command: tuple[str | Path, ...] = (
+                    python,
                     "-m",
                     "pip",
                     "install",
+                    "--disable-pip-version-check",
+                    "--timeout",
+                    "30",
+                    "--retries",
+                    "3",
+                    "--no-build-isolation",
                     "-r",
-                    str(requirements),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
+                    requirements,
                 )
-                output, _ = await process.communicate()
-                if process.returncode:
+                returncode, output = await self._run_process(*command)
+                if returncode and needs_build_isolation(output):
+                    command = tuple(part for part in command if part != "--no-build-isolation")
+                    returncode, output = await self._run_process(*command)
+                if returncode:
                     raise RuntimeError(
                         "Custom node requirements failed: "
-                        f"{output.decode(errors='replace')[-500:]}"
+                        f"{output[-500:]}"
                     )
                 self.update(item, percent=96, message="Requirements installed.")
 
@@ -1009,6 +1082,7 @@ class JobController:
         self.task: asyncio.Task[None] | None = None
         self.cancel_event = asyncio.Event()
         self.lock = asyncio.Lock()
+        self.diagnostics: deque[dict[str, Any]] = deque(maxlen=100)
 
     def update(self, **changes: Any) -> None:
         for key, value in changes.items():
@@ -1042,12 +1116,35 @@ class JobController:
     async def cancel(self) -> dict[str, Any]:
         if self.task and not self.task.done():
             self.cancel_event.set()
-            self.update(message="Cancelling after the current chunk…")
+            self.update(message="Cancelling…")
         return self.state.export()
 
     def check_cancelled(self) -> None:
         if self.cancel_event.is_set():
             raise InstallCancelled()
+
+    def record_diagnostic(
+        self, phase: str, label: str, started: float, *, result: str = "ok"
+    ) -> None:
+        self.diagnostics.append(
+            {
+                "phase": phase,
+                "label": safe_diagnostic_text(label),
+                "seconds": round(max(0, time.monotonic() - started), 2),
+                "result": result,
+                "at": utc_now(),
+            }
+        )
+
+    async def _stop_process(self, process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
     async def _run(self, workflow: dict[str, Any]) -> None:
         try:
@@ -1165,6 +1262,23 @@ class JobController:
                 "ComfyUI cannot be updated because its Git repository was not found."
             )
 
+        self.check_cancelled()
+        _returncode, head_before = await self._run_process(
+            "git", "-C", COMFYUI_DIR, "rev-parse", "HEAD"
+        )
+        head_before = head_before.strip().lower()
+        _returncode, upstream_head = await self._run_process(
+            "git", "ls-remote", COMFYUI_UPSTREAM, "refs/heads/master"
+        )
+        upstream_head = upstream_head.split("\t", 1)[0].strip().lower()
+        if _COMMIT_SHA.fullmatch(head_before) and head_before == upstream_head:
+            self.update(
+                stage="updating",
+                message="ComfyUI is already current — update skipped.",
+                bytes_per_second=0,
+            )
+            return
+
         commands: list[tuple[str, tuple[str | Path, ...]]] = [
             (
                 "Configuring the official ComfyUI repository…",
@@ -1175,7 +1289,7 @@ class JobController:
                     "remote",
                     "set-url",
                     "origin",
-                    "https://github.com/Comfy-Org/ComfyUI.git",
+                    COMFYUI_UPSTREAM,
                 ),
             ),
             (
@@ -1194,6 +1308,17 @@ class JobController:
             if returncode:
                 raise RuntimeError(f"ComfyUI update failed: {output[-500:]}")
 
+        _returncode, head_after = await self._run_process(
+            "git", "-C", COMFYUI_DIR, "rev-parse", "HEAD"
+        )
+        if _COMMIT_SHA.fullmatch(head_before) and head_after.strip().lower() == head_before:
+            self.update(
+                stage="updating",
+                message="ComfyUI did not change — requirements install skipped.",
+                bytes_per_second=0,
+            )
+            return
+
         if not requirements.is_file():
             raise RuntimeError("ComfyUI requirements.txt was not found after the update.")
 
@@ -1210,6 +1335,11 @@ class JobController:
             "-m",
             "pip",
             "install",
+            "--disable-pip-version-check",
+            "--timeout",
+            "30",
+            "--retries",
+            "3",
             "-r",
             requirements,
         )
@@ -1249,6 +1379,7 @@ class JobController:
                     file_spec.get("name")
                     or Path(str(file_spec.get("destination", "file"))).name
                 )
+                started = time.monotonic()
                 try:
                     downloaded = await self._download_file(
                         client,
@@ -1260,9 +1391,12 @@ class JobController:
                         download_ceiling,
                     )
                     completed_bytes += downloaded
+                    self.record_diagnostic("download", name, started)
                 except InstallCancelled:
+                    self.record_diagnostic("download", name, started, result="cancelled")
                     raise
                 except Exception as exc:
+                    self.record_diagnostic("download", name, started, result="failed")
                     self.add_warning(f"{name}: {exc}")
                     self.update(
                         message=f"{name} failed — skipped; continuing setup…",
@@ -1574,13 +1708,39 @@ class JobController:
         return destination.stat().st_size
 
     async def _run_process(self, *command: str | Path) -> tuple[int, str]:
+        """Run an installer command with cancellation and a bounded wait."""
+        self.check_cancelled()
+        started = time.monotonic()
         process = await asyncio.create_subprocess_exec(
             *(str(part) for part in command),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        output, _ = await process.communicate()
-        return process.returncode or 0, output.decode(errors="replace")
+        communicate = asyncio.create_task(process.communicate())
+        cancellation = asyncio.create_task(self.cancel_event.wait())
+        try:
+            done, _pending = await asyncio.wait(
+                {communicate, cancellation},
+                timeout=process_timeout(command),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancellation in done:
+                await self._stop_process(process)
+                await communicate
+                raise InstallCancelled()
+            if communicate not in done:
+                await self._stop_process(process)
+                output, _ = await communicate
+                detail = output.decode(errors="replace")[-300:]
+                raise ProcessTimedOut(
+                    f"Command timed out after {human_seconds(process_timeout(command))}: {detail}"
+                )
+            output, _ = await communicate
+            return process.returncode or 0, output.decode(errors="replace")
+        finally:
+            cancellation.cancel()
+            await asyncio.gather(cancellation, return_exceptions=True)
+            self.record_diagnostic("command", str(command[0]), started)
 
     async def _install_custom_node(self, node: dict[str, Any]) -> None:
         name = str(node.get("name", "")).strip()
@@ -1666,14 +1826,25 @@ class JobController:
             pip = COMFYUI_VENV / "bin" / "python"
             if not pip.exists():
                 pip = Path("python3.12")
-            returncode, output = await self._run_process(
+            command: tuple[str | Path, ...] = (
                 pip,
                 "-m",
                 "pip",
                 "install",
+                "--disable-pip-version-check",
+                "--timeout",
+                "30",
+                "--retries",
+                "3",
+                "--no-build-isolation",
                 "-r",
                 requirements,
             )
+            returncode, output = await self._run_process(*command)
+            if returncode and needs_build_isolation(output):
+                self.update(message=f"Retrying {name} with build isolation…")
+                command = tuple(part for part in command if part != "--no-build-isolation")
+                returncode, output = await self._run_process(*command)
             if returncode:
                 raise RuntimeError(
                     f"Dependencies failed for {name}: {output[-500:]}"
@@ -1722,7 +1893,7 @@ custom_model_controller = CustomModelController()
 custom_node_controller = CustomNodeController()
 app = FastAPI(
     title="dsnn Model Grabber",
-    version="1.1.0",
+    version="1.4.0",
     docs_url=None,
     redoc_url=None,
 )
@@ -1748,6 +1919,26 @@ async def catalog() -> dict[str, Any]:
 @app.get("/api/status")
 async def status() -> dict[str, Any]:
     return controller.state.export()
+
+
+@app.get("/api/diagnostics")
+async def diagnostics() -> dict[str, Any]:
+    """Recent timings only; intentionally excludes URLs, paths, and credentials."""
+    return {"records": list(controller.diagnostics)}
+
+
+@app.get("/api/diagnostics/report", response_class=PlainTextResponse)
+async def diagnostics_report() -> str:
+    records = list(controller.diagnostics)
+    if not records:
+        return "No installer diagnostics have been recorded yet.\n"
+    lines = ["dsnn Model Grabber diagnostics", ""]
+    for record in records:
+        lines.append(
+            f"{record['phase']}: {record['label']} — "
+            f"{human_seconds(float(record['seconds']))} ({record['result']})"
+        )
+    return "\n".join(lines) + "\n"
 
 
 @app.post("/api/install/{workflow_id}")
