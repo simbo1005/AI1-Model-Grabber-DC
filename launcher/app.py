@@ -547,6 +547,23 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def xet_incomplete_bytes(staging_dir: Path, started_at_ns: int) -> int:
+    """Return Xet's current partial-file size without parsing its terminal output."""
+    download_cache = staging_dir / ".cache" / "huggingface" / "download"
+    try:
+        candidates = download_cache.rglob("*.incomplete")
+        return max(
+            (
+                candidate.stat().st_size
+                for candidate in candidates
+                if candidate.stat().st_mtime_ns >= started_at_ns
+            ),
+            default=0,
+        )
+    except OSError:
+        return 0
+
+
 def needs_build_isolation(output: str) -> bool:
     """Only retry without isolation when the failure names a missing backend."""
     lowered = output.lower()
@@ -1423,6 +1440,22 @@ class JobController:
         expected_size = max(0, int(file_spec.get("size_bytes", 0)))
         expected_sha = str(file_spec.get("sha256", "")).lower().strip()
 
+        # Clear the previous model's counters before any slow work (including an
+        # existing-file checksum) so the panel never pairs an old numerator with
+        # this file's size.
+        self.update(
+            stage="downloading",
+            message=f"Preparing {name}…",
+            current_file=name,
+            file_index=index + 1,
+            file_downloaded_bytes=0,
+            file_total_bytes=expected_size,
+            downloaded_bytes=completed_bytes,
+            total_bytes=known_total,
+            bytes_per_second=0,
+            percent=(index / max(file_count, 1)) * download_ceiling,
+        )
+
         if destination.exists() and destination.stat().st_size > 0:
             size_matches = not expected_size or destination.stat().st_size == expected_size
             hash_matches = (
@@ -1574,23 +1607,50 @@ class JobController:
         staging_dir = destination.parent / ".dsnn-hf-downloads"
         staging_dir.mkdir(parents=True, exist_ok=True)
         token = huggingface_token() if requires_token else None
+        started = time.monotonic()
+        started_at_ns = time.time_ns()
         self.update(
             stage="downloading",
             message=f"Downloading {name} with Hugging Face Xet…",
             current_file=name,
             file_index=index + 1,
+            file_downloaded_bytes=0,
             file_total_bytes=expected_size,
             bytes_per_second=0,
         )
-        downloaded = await asyncio.to_thread(
-            hf_hub_download,
-            repo_id=repo_id,
-            repo_type=repo_type,
-            filename=filename,
-            revision=revision,
-            token=token,
-            local_dir=staging_dir,
+        download_task = asyncio.create_task(
+            asyncio.to_thread(
+                hf_hub_download,
+                repo_id=repo_id,
+                repo_type=repo_type,
+                filename=filename,
+                revision=revision,
+                token=token,
+                local_dir=staging_dir,
+            )
         )
+        previous_bytes = 0
+        previous_sample = started
+        while not download_task.done():
+            await asyncio.sleep(0.4)
+            self.check_cancelled()
+            current = await asyncio.to_thread(xet_incomplete_bytes, staging_dir, started_at_ns)
+            sampled_at = time.monotonic()
+            sample_seconds = max(sampled_at - previous_sample, 0.01)
+            speed = max(0, current - previous_bytes) / sample_seconds
+            file_total = expected_size or current
+            fraction = min(current / file_total, 0.999) if file_total else 0
+            self.update(
+                file_downloaded_bytes=current,
+                file_total_bytes=file_total,
+                downloaded_bytes=completed_bytes + current,
+                total_bytes=known_total or file_total,
+                bytes_per_second=speed,
+                percent=((index + fraction) / max(file_count, 1)) * download_ceiling,
+            )
+            previous_bytes = current
+            previous_sample = sampled_at
+        downloaded = await download_task
         downloaded_path = Path(downloaded).resolve()
         if not downloaded_path.is_relative_to(staging_dir.resolve()):
             raise RuntimeError(f"Hugging Face returned an unsafe path for {name}.")
