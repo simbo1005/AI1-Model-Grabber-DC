@@ -1,0 +1,44 @@
+# Reviewed wheel-based dependencies declared by the twelve pinned custom-node packs.
+# Source-only requirements (dlib) are handled in their own Dockerfile step below.
+# Keep this list conservative: node requirements still run at installation time.
+accelerate
+blend-modes
+clip-interrogator>=0.6.0
+color-matcher
+colour-science
+diffusers>=0.33.1
+dill
+einops
+gguf
+huggingface-hub>=0.23.4
+imageio-ffmpeg
+insightface
+lark
+loguru
+matplotlib
+mss
+numpy>=1.26.4
+omegaconf>=2.3.0
+onnxruntime
+opencv-python
+opencv-python-headless
+peft>=0.17.0
+piexif
+pillow>=10.3.0
+psutil
+pymatting
+pywavelets
+rotary-embedding-torch>=0.5.3
+safetensors
+scikit-image
+scikit-learn
+scipy
+segment-anything
+sentencepiece
+spandrel
+timm
+torch
+torchvision
+tqdm
+transformers>=4.43.2
+ultralytics>=8.3.162

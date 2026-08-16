@@ -1,0 +1,5 @@
+# Source dependencies explicitly reviewed for the pinned custom-node catalog.
+# dlib is built in the Docker image; the other entries remain runtime-only.
+dlib
+opencv-contrib-python
+sam2
