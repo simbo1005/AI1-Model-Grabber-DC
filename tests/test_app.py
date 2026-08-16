@@ -208,8 +208,17 @@ def test_huggingface_file_reference_parses_resolve_urls() -> None:
         "https://huggingface.co/Comfy-Org/example/resolve/main/models/model.safetensors"
     ) == (
         "Comfy-Org/example",
+        "model",
         "main",
         "models/model.safetensors",
+    )
+    assert launcher_app.huggingface_file_reference(
+        "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/sams/sam_vit_b_01ec64.pth"
+    ) == (
+        "Gourieff/ReActor",
+        "dataset",
+        "main",
+        "models/sams/sam_vit_b_01ec64.pth",
     )
     assert launcher_app.huggingface_file_reference(
         "https://example.com/owner/model/resolve/main/file"
