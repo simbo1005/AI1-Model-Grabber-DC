@@ -225,6 +225,48 @@ def test_huggingface_file_reference_parses_resolve_urls() -> None:
     ) is None
 
 
+def test_xet_progress_reads_the_active_incomplete_file(tmp_path) -> None:
+    incomplete = tmp_path / ".cache" / "huggingface" / "download" / "model.incomplete"
+    incomplete.parent.mkdir(parents=True)
+    incomplete.write_bytes(b"x" * 4096)
+
+    assert launcher_app.xet_incomplete_bytes(tmp_path, 0) == 4096
+
+
+def test_workflow_download_resets_file_metrics_before_the_next_model(tmp_path, monkeypatch) -> None:
+    comfy_dir = tmp_path / "ComfyUI"
+    comfy_dir.mkdir()
+    monkeypatch.setattr(launcher_app, "COMFYUI_DIR", comfy_dir)
+    controller = launcher_app.JobController()
+    controller.state.file_downloaded_bytes = 8 * 1024**3
+    controller.state.file_total_bytes = 8 * 1024**3
+
+    async def fake_download(*_args, **_kwargs) -> int:
+        return 0
+
+    monkeypatch.setattr(controller, "_download_file_with_wget", fake_download)
+    monkeypatch.setattr(launcher_app.shutil, "which", lambda _name: "wget")
+    async def invoke() -> None:
+        await controller._download_file(
+            object(),
+            {
+                "name": "next-model.safetensors",
+                "url": "https://example.test/next-model.safetensors",
+                "destination": "models/checkpoints/next-model.safetensors",
+                "size_bytes": 9 * 1024**3,
+            },
+            1,
+            2,
+            8 * 1024**3,
+            17 * 1024**3,
+            99,
+        )
+
+    asyncio.run(invoke())
+    assert controller.state.file_downloaded_bytes == 0
+    assert controller.state.file_total_bytes == 9 * 1024**3
+
+
 def test_pip_build_isolation_retry_is_only_used_for_missing_backends() -> None:
     assert launcher_app.needs_build_isolation("ModuleNotFoundError: No module named 'cmake'")
     assert not launcher_app.needs_build_isolation("Read timed out while fetching a wheel")
