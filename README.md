@@ -11,17 +11,21 @@ RunPod.
 - dsnn Model Grabber on port `3000`.
 - High-performance Hugging Face Xet downloads, plus native `wget` downloads for other sources, with resumable `.part` files and visible progress.
 - Workflow and custom-node installation from a declarative JSON catalog.
+- Bounded, cancellable Git and pip operations so a stalled custom-node install cannot hang indefinitely.
+- Docker-warmed custom-node dependencies and prebuilt `dlib` for faster FaceAnalysis setup.
+- Redacted timing diagnostics at `/api/diagnostics/report` for support and troubleshooting.
 - A Custom Models queue for direct downloads into any ComfyUI model folder.
 - A button that routes from the launcher to the matching RunPod ComfyUI proxy.
 - Optional launcher updates from GitHub at container startup.
 
-The current catalog contains five production installers:
+The current catalog contains six production installers:
 
 - Image Generation (approximately 19.9 GB)
 - Krea 2 (approximately 18.4 GB)
 - Dataset Generator (approximately 44.6 GB)
 - Image Edit (approximately 17.8 GB)
 - Motion Control (approximately 26.5 GB)
+- MiniMax H3 (approximately 63.4 GB)
 
 The catalog installs only models, supporting files and custom nodes. Product
 workflow JSON files are deliberately not included.
@@ -51,11 +55,21 @@ click through one serial install queue. Repositories are cloned into a temporary
 folder, their `requirements.txt` is installed with ComfyUI's Python environment,
 and the completed folder is then moved into `ComfyUI/custom_nodes`.
 
+Git and pip work has bounded timeouts. Workflow installs can be cancelled during
+those phases, and pip first avoids build isolation so it reuses the image's CUDA
+packages; it retries normally only when a missing build backend requires it.
+
 An existing checkout with the same Git origin is shown as already found. Failed
 clones or dependency installs remove their temporary folder instead of leaving
 an incomplete custom node behind. Newly installed nodes require a ComfyUI
 restart before they become available; the **Restart ComfyUI** button performs
 that restart without restarting the pod.
+
+## Diagnostics
+
+`/api/diagnostics` returns recent workflow download and command timings as JSON.
+`/api/diagnostics/report` is a plain-text version suitable for support requests.
+Neither endpoint includes download URLs, filesystem paths or credentials.
 
 ## RunPod template
 
