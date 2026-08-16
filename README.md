@@ -9,7 +9,7 @@ RunPod.
 - ComfyUI on port `8188`.
 - JupyterLab on port `8888`.
 - dsnn Model Grabber on port `3000`.
-- Native `wget` downloads with resumable `.part` files and visible progress.
+- High-performance Hugging Face Xet downloads, plus native `wget` downloads for other sources, with resumable `.part` files and visible progress.
 - Workflow and custom-node installation from a declarative JSON catalog.
 - A Custom Models queue for direct downloads into any ComfyUI model folder.
 - A button that routes from the launcher to the matching RunPod ComfyUI proxy.

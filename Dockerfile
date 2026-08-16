@@ -20,6 +20,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LAUNCHER_GITHUB_REPO=simbo1005/AI1-Model-Grabber-DC \
     LAUNCHER_GITHUB_REF=main \
     COMFYUI_DIR=/workspace/runpod-slim/ComfyUI \
+    HF_XET_HIGH_PERFORMANCE=1 \
     HF_TOKEN_FILE=/opt/dsnn/secrets/hf_token
 
 WORKDIR /opt/dsnn
