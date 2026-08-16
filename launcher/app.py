@@ -20,7 +20,6 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from huggingface_hub import hf_hub_download
 from pydantic import BaseModel
 
 
@@ -511,6 +510,25 @@ def wget_command(
     return command
 
 
+def hf_download_command(
+    reference: tuple[str, str, str, str], *, destination_dir: Path
+) -> list[str]:
+    """Build the official Hub CLI command without exposing a token in argv."""
+    repo_id, repo_type, revision, filename = reference
+    return [
+        "hf",
+        "download",
+        repo_id,
+        filename,
+        "--repo-type",
+        repo_type,
+        "--revision",
+        revision,
+        "--local-dir",
+        str(destination_dir),
+    ]
+
+
 def huggingface_file_reference(url: str) -> tuple[str, str, str, str] | None:
     """Return (repo_id, repo_type, revision, filename) for a Hub /resolve/ URL."""
     parts = urlsplit(url)
@@ -925,6 +943,7 @@ class CustomNodeController:
                 "clone",
                 "--filter=blob:none",
                 "--single-branch",
+                "--depth=1",
                 item.url,
                 str(staging),
             )
@@ -1480,7 +1499,7 @@ class JobController:
         partial = destination.with_name(destination.name + ".part")
         hf_reference = huggingface_file_reference(url)
         if hf_reference:
-            return await self._download_file_with_hf_xet(
+            return await self._download_file_with_hf_cli(
                 hf_reference,
                 name,
                 destination,
@@ -1586,7 +1605,7 @@ class JobController:
         os.replace(partial, destination)
         return destination.stat().st_size
 
-    async def _download_file_with_hf_xet(
+    async def _download_file_with_hf_cli(
         self,
         reference: tuple[str, str, str, str],
         name: str,
@@ -1602,56 +1621,67 @@ class JobController:
         *,
         requires_token: bool,
     ) -> int:
-        """Download Hub files with Xet's adaptive parallel transfer engine."""
-        repo_id, repo_type, revision, filename = reference
+        """Use Hugging Face's CLI, which invokes hf_xet at high performance."""
+        _repo_id, _repo_type, _revision, filename = reference
         staging_dir = destination.parent / ".dsnn-hf-downloads"
         staging_dir.mkdir(parents=True, exist_ok=True)
-        token = huggingface_token() if requires_token else None
+        if not shutil.which("hf"):
+            raise RuntimeError("The Hugging Face 'hf' CLI is missing from this image.")
+        environment = os.environ.copy()
+        if requires_token:
+            environment["HF_TOKEN"] = huggingface_token()
         started = time.monotonic()
         started_at_ns = time.time_ns()
         self.update(
             stage="downloading",
-            message=f"Downloading {name} with Hugging Face Xet…",
+            message=f"Downloading {name} with Hugging Face CLI + Xet…",
             current_file=name,
             file_index=index + 1,
             file_downloaded_bytes=0,
             file_total_bytes=expected_size,
             bytes_per_second=0,
         )
-        download_task = asyncio.create_task(
-            asyncio.to_thread(
-                hf_hub_download,
-                repo_id=repo_id,
-                repo_type=repo_type,
-                filename=filename,
-                revision=revision,
-                token=token,
-                local_dir=staging_dir,
-            )
+        process = await asyncio.create_subprocess_exec(
+            *hf_download_command(reference, destination_dir=staging_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=environment,
         )
+        download_task = asyncio.create_task(process.communicate())
         previous_bytes = 0
         previous_sample = started
-        while not download_task.done():
-            await asyncio.sleep(0.4)
-            self.check_cancelled()
-            current = await asyncio.to_thread(xet_incomplete_bytes, staging_dir, started_at_ns)
-            sampled_at = time.monotonic()
-            sample_seconds = max(sampled_at - previous_sample, 0.01)
-            speed = max(0, current - previous_bytes) / sample_seconds
-            file_total = expected_size or current
-            fraction = min(current / file_total, 0.999) if file_total else 0
-            self.update(
-                file_downloaded_bytes=current,
-                file_total_bytes=file_total,
-                downloaded_bytes=completed_bytes + current,
-                total_bytes=known_total or file_total,
-                bytes_per_second=speed,
-                percent=((index + fraction) / max(file_count, 1)) * download_ceiling,
+        try:
+            while not download_task.done():
+                await asyncio.sleep(0.4)
+                self.check_cancelled()
+                current = await asyncio.to_thread(xet_incomplete_bytes, staging_dir, started_at_ns)
+                sampled_at = time.monotonic()
+                sample_seconds = max(sampled_at - previous_sample, 0.01)
+                speed = max(0, current - previous_bytes) / sample_seconds
+                file_total = expected_size or current
+                fraction = min(current / file_total, 0.999) if file_total else 0
+                self.update(
+                    file_downloaded_bytes=current,
+                    file_total_bytes=file_total,
+                    downloaded_bytes=completed_bytes + current,
+                    total_bytes=known_total or file_total,
+                    bytes_per_second=speed,
+                    percent=((index + fraction) / max(file_count, 1)) * download_ceiling,
+                )
+                previous_bytes = current
+                previous_sample = sampled_at
+        except InstallCancelled:
+            await self._stop_process(process)
+            await download_task
+            raise
+        _stdout, stderr = await download_task
+        if process.returncode:
+            detail = stderr.decode(errors="replace").strip().splitlines()
+            raise RuntimeError(
+                f"Hugging Face CLI failed while downloading {name}: "
+                f"{detail[-1] if detail else 'unknown error'}"
             )
-            previous_bytes = current
-            previous_sample = sampled_at
-        downloaded = await download_task
-        downloaded_path = Path(downloaded).resolve()
+        downloaded_path = (staging_dir / filename).resolve()
         if not downloaded_path.is_relative_to(staging_dir.resolve()):
             raise RuntimeError(f"Hugging Face returned an unsafe path for {name}.")
         if not downloaded_path.is_file():
@@ -1819,6 +1849,7 @@ class JobController:
                 "git",
                 "clone",
                 "--filter=blob:none",
+                "--depth=1",
                 repo,
                 destination,
             )
@@ -1859,6 +1890,7 @@ class JobController:
                     "fetch",
                     "--no-tags",
                     "--filter=blob:none",
+                    "--depth=1",
                     "origin",
                     ref,
                 )
