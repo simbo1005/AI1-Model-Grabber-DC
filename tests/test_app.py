@@ -225,6 +225,19 @@ def test_huggingface_file_reference_parses_resolve_urls() -> None:
     ) is None
 
 
+def test_hf_download_command_uses_the_official_cli_without_a_token_argument(tmp_path) -> None:
+    command = launcher_app.hf_download_command(
+        ("Gourieff/ReActor", "dataset", "main", "models/sams/sam_vit_b_01ec64.pth"),
+        destination_dir=tmp_path,
+    )
+
+    assert command[:3] == ["hf", "download", "Gourieff/ReActor"]
+    assert "--repo-type" in command
+    assert "dataset" in command
+    assert "--token" not in command
+    assert command[-1] == str(tmp_path)
+
+
 def test_xet_progress_reads_the_active_incomplete_file(tmp_path) -> None:
     incomplete = tmp_path / ".cache" / "huggingface" / "download" / "model.incomplete"
     incomplete.parent.mkdir(parents=True)
