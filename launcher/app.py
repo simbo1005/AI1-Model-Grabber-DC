@@ -20,6 +20,7 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from huggingface_hub import hf_hub_download
 from pydantic import BaseModel
 
 
@@ -487,6 +488,26 @@ def wget_command(
         command.extend(["--continue", f"--directory-prefix={destination_dir}"])
     command.append(url)
     return command
+
+
+def huggingface_file_reference(url: str) -> tuple[str, str, str] | None:
+    """Return (repo_id, revision, filename) for a Hub /resolve/ URL."""
+    parts = urlsplit(url)
+    hostname = (parts.hostname or "").lower()
+    if hostname != "huggingface.co" and not hostname.endswith(".huggingface.co"):
+        return None
+    segments = [unquote(part) for part in parts.path.split("/") if part]
+    try:
+        resolve_index = segments.index("resolve")
+    except ValueError:
+        return None
+    if resolve_index < 2 or len(segments) <= resolve_index + 2:
+        return None
+    return (
+        "/".join(segments[:resolve_index]),
+        segments[resolve_index + 1],
+        "/".join(segments[resolve_index + 2 :]),
+    )
 
 
 def file_sha256(path: Path) -> str:
@@ -1282,6 +1303,22 @@ class JobController:
 
         url, headers = tokenized_request(file_spec)
         partial = destination.with_name(destination.name + ".part")
+        hf_reference = huggingface_file_reference(url)
+        if hf_reference:
+            return await self._download_file_with_hf_xet(
+                hf_reference,
+                name,
+                destination,
+                partial,
+                expected_size,
+                expected_sha,
+                index,
+                file_count,
+                completed_bytes,
+                known_total,
+                download_ceiling,
+                requires_token=file_spec.get("auth") == "huggingface",
+            )
         if shutil.which("wget"):
             return await self._download_file_with_wget(
                 url,
@@ -1371,6 +1408,72 @@ class JobController:
                     f"Checksum verification failed for {name}; the .part file was retained."
                 )
 
+        os.replace(partial, destination)
+        return destination.stat().st_size
+
+    async def _download_file_with_hf_xet(
+        self,
+        reference: tuple[str, str, str],
+        name: str,
+        destination: Path,
+        partial: Path,
+        expected_size: int,
+        expected_sha: str,
+        index: int,
+        file_count: int,
+        completed_bytes: int,
+        known_total: int,
+        download_ceiling: float,
+        *,
+        requires_token: bool,
+    ) -> int:
+        """Download Hub files with Xet's adaptive parallel transfer engine."""
+        repo_id, revision, filename = reference
+        staging_dir = destination.parent / ".dsnn-hf-downloads"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        token = huggingface_token() if requires_token else None
+        self.update(
+            stage="downloading",
+            message=f"Downloading {name} with Hugging Face Xet…",
+            current_file=name,
+            file_index=index + 1,
+            file_total_bytes=expected_size,
+            bytes_per_second=0,
+        )
+        downloaded = await asyncio.to_thread(
+            hf_hub_download,
+            repo_id=repo_id,
+            filename=filename,
+            revision=revision,
+            token=token,
+            local_dir=staging_dir,
+        )
+        downloaded_path = Path(downloaded).resolve()
+        if not downloaded_path.is_relative_to(staging_dir.resolve()):
+            raise RuntimeError(f"Hugging Face returned an unsafe path for {name}.")
+        if not downloaded_path.is_file():
+            raise RuntimeError(f"Hugging Face did not create a download for {name}.")
+
+        os.replace(downloaded_path, partial)
+        current = partial.stat().st_size
+        if expected_size and current != expected_size:
+            raise RuntimeError(
+                f"{name} has the wrong size after download; it was left as a .part file."
+            )
+        self.update(
+            file_downloaded_bytes=current,
+            file_total_bytes=expected_size or current,
+            downloaded_bytes=completed_bytes + current,
+            total_bytes=known_total or current,
+            percent=((index + 1) / max(file_count, 1)) * download_ceiling,
+        )
+        if expected_sha:
+            self.update(message=f"Verifying {name}…", bytes_per_second=0)
+            actual_sha = await asyncio.to_thread(file_sha256, partial)
+            if actual_sha != expected_sha:
+                raise RuntimeError(
+                    f"Checksum verification failed for {name}; the .part file was retained."
+                )
         os.replace(partial, destination)
         return destination.stat().st_size
 
