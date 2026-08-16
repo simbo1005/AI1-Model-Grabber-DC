@@ -461,6 +461,34 @@ def tokenized_request(file_spec: dict[str, Any]) -> tuple[str, dict[str, str]]:
     return url, headers
 
 
+def wget_command(
+    url: str,
+    headers: dict[str, str],
+    *,
+    destination_dir: Path,
+    resume: bool,
+) -> list[str]:
+    """Build the native downloader command used for large workflow assets."""
+    command = [
+        "wget",
+        "--no-verbose",
+        "--show-progress",
+        "--progress=dot:giga",
+        "--tries=4",
+        "--waitretry=2",
+        "--timeout=30",
+        "--max-redirect=10",
+        "--no-hsts",
+        "--no-cookies",
+    ]
+    for name, value in headers.items():
+        command.append(f"--header={name}: {value}")
+    if resume:
+        command.extend(["--continue", f"--directory-prefix={destination_dir}"])
+    command.append(url)
+    return command
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -1254,6 +1282,22 @@ class JobController:
 
         url, headers = tokenized_request(file_spec)
         partial = destination.with_name(destination.name + ".part")
+        if shutil.which("wget"):
+            return await self._download_file_with_wget(
+                url,
+                headers,
+                name,
+                destination,
+                partial,
+                expected_size,
+                expected_sha,
+                index,
+                file_count,
+                completed_bytes,
+                known_total,
+                download_ceiling,
+            )
+
         partial_size = partial.stat().st_size if partial.exists() else 0
         if partial_size:
             headers["Range"] = f"bytes={partial_size}-"
@@ -1327,6 +1371,93 @@ class JobController:
                     f"Checksum verification failed for {name}; the .part file was retained."
                 )
 
+        os.replace(partial, destination)
+        return destination.stat().st_size
+
+    async def _download_file_with_wget(
+        self,
+        url: str,
+        headers: dict[str, str],
+        name: str,
+        destination: Path,
+        partial: Path,
+        expected_size: int,
+        expected_sha: str,
+        index: int,
+        file_count: int,
+        completed_bytes: int,
+        known_total: int,
+        download_ceiling: float,
+    ) -> int:
+        """Use wget's native transfer engine while keeping launcher semantics."""
+        staging_dir = destination.parent / ".dsnn-downloads"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        staging_file = staging_dir / filename_from_url(url)
+        if partial.exists():
+            os.replace(partial, staging_file)
+
+        started = time.monotonic()
+        self.update(
+            stage="downloading",
+            message=f"Downloading {name}…",
+            current_file=name,
+            file_index=index + 1,
+            file_downloaded_bytes=staging_file.stat().st_size if staging_file.exists() else 0,
+            file_total_bytes=expected_size,
+        )
+        process = await asyncio.create_subprocess_exec(
+            *wget_command(url, headers, destination_dir=staging_dir, resume=True),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        wait_task = asyncio.create_task(process.communicate())
+        try:
+            while not wait_task.done():
+                await asyncio.sleep(0.5)
+                self.check_cancelled()
+                current = staging_file.stat().st_size if staging_file.exists() else 0
+                elapsed = max(time.monotonic() - started, 0.01)
+                file_total = expected_size or current
+                file_fraction = current / file_total if file_total else 0
+                self.update(
+                    file_downloaded_bytes=current,
+                    file_total_bytes=file_total,
+                    downloaded_bytes=completed_bytes + current,
+                    total_bytes=known_total or file_total,
+                    bytes_per_second=current / elapsed,
+                    percent=((index + file_fraction) / max(file_count, 1))
+                    * download_ceiling,
+                )
+        except InstallCancelled:
+            process.terminate()
+            await wait_task
+            if staging_file.exists():
+                os.replace(staging_file, partial)
+            raise
+
+        _stdout, stderr = await wait_task
+        if process.returncode:
+            if staging_file.exists():
+                os.replace(staging_file, partial)
+            detail = stderr.decode(errors="replace").strip().splitlines()
+            raise RuntimeError(
+                f"wget failed while downloading {name}: {detail[-1] if detail else 'unknown error'}"
+            )
+        if not staging_file.exists():
+            raise RuntimeError(f"wget did not create a download for {name}.")
+
+        os.replace(staging_file, partial)
+        if expected_size and partial.stat().st_size != expected_size:
+            raise RuntimeError(
+                f"{name} has the wrong size after download; it was left as a .part file."
+            )
+        if expected_sha:
+            self.update(message=f"Verifying {name}…", bytes_per_second=0)
+            actual_sha = await asyncio.to_thread(file_sha256, partial)
+            if actual_sha != expected_sha:
+                raise RuntimeError(
+                    f"Checksum verification failed for {name}; the .part file was retained."
+                )
         os.replace(partial, destination)
         return destination.stat().st_size
 
