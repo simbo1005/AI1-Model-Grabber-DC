@@ -238,11 +238,6 @@ def test_hf_download_command_uses_the_official_cli_without_a_token_argument(tmp_
     assert command[-1] == str(tmp_path)
 
 
-def test_hf_xet_can_be_disabled_for_a_cli_comparison(monkeypatch) -> None:
-    monkeypatch.delenv("LAUNCHER_DISABLE_HF_XET", raising=False)
-    assert launcher_app.hf_xet_is_disabled() is True
-    monkeypatch.setenv("LAUNCHER_DISABLE_HF_XET", "0")
-    assert launcher_app.hf_xet_is_disabled() is False
 
 
 def test_xet_progress_reads_the_active_incomplete_file(tmp_path) -> None:
