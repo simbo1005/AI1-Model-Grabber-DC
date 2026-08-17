@@ -529,12 +529,6 @@ def hf_download_command(
     ]
 
 
-def hf_xet_is_disabled() -> bool:
-    """Keep Xet enabled by default; this opt-out exists only for diagnostics."""
-    value = os.getenv("LAUNCHER_DISABLE_HF_XET", "0").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
 def huggingface_file_reference(url: str) -> tuple[str, str, str, str] | None:
     """Return (repo_id, repo_type, revision, filename) for a Hub /resolve/ URL."""
     parts = urlsplit(url)
@@ -1636,19 +1630,11 @@ class JobController:
         environment = os.environ.copy()
         if requires_token:
             environment["HF_TOKEN"] = huggingface_token()
-        if hf_xet_is_disabled():
-            environment["HF_HUB_DISABLE_XET"] = "1"
-        else:
-            environment.pop("HF_HUB_DISABLE_XET", None)
         started = time.monotonic()
         started_at_ns = time.time_ns()
         self.update(
             stage="downloading",
-            message=(
-                f"Downloading {name} with Hugging Face CLI…"
-                if hf_xet_is_disabled()
-                else f"Downloading {name} with Hugging Face CLI + Xet…"
-            ),
+            message=f"Downloading {name} with Hugging Face CLI…",
             current_file=name,
             file_index=index + 1,
             file_downloaded_bytes=0,
