@@ -530,8 +530,8 @@ def hf_download_command(
 
 
 def hf_xet_is_disabled() -> bool:
-    """Allow a direct Hugging Face CLI comparison without changing catalog URLs."""
-    value = os.getenv("LAUNCHER_DISABLE_HF_XET", "1").strip().lower()
+    """Keep Xet enabled by default; this opt-out exists only for diagnostics."""
+    value = os.getenv("LAUNCHER_DISABLE_HF_XET", "0").strip().lower()
     return value not in {"0", "false", "no", "off"}
 
 
