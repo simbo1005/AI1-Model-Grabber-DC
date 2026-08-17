@@ -1628,8 +1628,14 @@ class JobController:
         if not shutil.which("hf"):
             raise RuntimeError("The Hugging Face 'hf' CLI is missing from this image.")
         environment = os.environ.copy()
-        if requires_token:
-            environment["HF_TOKEN"] = huggingface_token()
+        token = huggingface_token()
+        if requires_token and not token:
+            raise RuntimeError(f"{name} requires Hugging Face access.")
+        # Send the configured token for public downloads as well. Besides making
+        # gated downloads work, this gives the Hub the same authenticated request
+        # context as an `hf auth login` CLI session without exposing it in argv.
+        if token:
+            environment["HF_TOKEN"] = token
         started = time.monotonic()
         started_at_ns = time.time_ns()
         self.update(
