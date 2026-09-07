@@ -6,7 +6,7 @@ on:
       tag:
         description: Docker image tag
         required: true
-        default: "2.1-test"
+        default: "2.2-test"
       publish_latest:
         description: Also update the latest tag
         required: true

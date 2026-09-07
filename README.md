@@ -18,11 +18,12 @@ RunPod.
 - A button that routes from the launcher to the matching RunPod ComfyUI proxy.
 - Optional launcher updates from GitHub at container startup.
 
-The current catalog contains four production installers:
+The current catalog contains five production installers:
 
 - Krea 2 Extended (approximately 25.4 GB)
 - Image Edit (approximately 17.8 GB)
-- Motion Control (approximately 26.5 GB)
+- WAN Motion Control (approximately 45.4 GB)
+- Motion Control GOD Edition (approximately 61.3 GB)
 - MiniMax H3 (approximately 63.4 GB)
 
 The catalog installs only models, supporting files and custom nodes. Product
@@ -34,6 +35,11 @@ installs are not discarded. When an existing custom-node checkout does not yet
 contain its pinned commit, the launcher fetches that commit before checkout.
 After every preset installation, ComfyUI is automatically restarted through
 ComfyUI Manager and the launcher waits until port 8188 is ready again.
+
+Some custom nodes expect a model inside their own directory. Catalog
+`model_links` place the already-downloaded model at that private path with a
+hard link when possible, falling back to a copy, so the model is not downloaded
+again.
 
 ## Custom models
 
@@ -74,7 +80,7 @@ Neither endpoint includes download URLs, filesystem paths or credentials.
 Use:
 
 ```text
-Container image: sdcioba/comfyui-workflow-launcher:2.1-test
+Container image: sdcioba/comfyui-workflow-launcher:2.1
 HTTP ports:      3000, 8188, 8888
 Container disk:  at least 100 GB for the largest individual installer
 ```
@@ -215,8 +221,8 @@ On Windows PowerShell, set environment variables with `$env:NAME="value"` first.
 ## Build manually
 
 ```text
-docker build -t sdcioba/comfyui-workflow-launcher:2.1-test .
-docker push sdcioba/comfyui-workflow-launcher:2.1-test
+docker build -t sdcioba/comfyui-workflow-launcher:2.1 .
+docker push sdcioba/comfyui-workflow-launcher:2.1
 ```
 
 Alternatively, run the included GitHub Actions workflow after adding repository
