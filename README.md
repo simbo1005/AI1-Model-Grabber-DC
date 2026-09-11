@@ -20,7 +20,7 @@ RunPod.
 
 The current catalog contains five production installers:
 
-- Krea 2 Extended (approximately 40.0 GB)
+- Krea 2 Extended (approximately 79.4 GB)
 - Image Edit (approximately 17.8 GB)
 - WAN Motion Control (approximately 45.4 GB)
 - Motion Control GOD Edition (approximately 61.3 GB)
