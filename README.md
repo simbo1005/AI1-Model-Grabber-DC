@@ -10,6 +10,8 @@ RunPod.
 - JupyterLab on port `8888`.
 - dsnn Model Grabber on port `3000`.
 - Hugging Face CLI downloads (with a toggleable Xet engine) plus native `wget` downloads for other sources, with resumable `.part` files and visible progress.
+- Expandable workflow tiles with per-resource selection, live selected-size totals,
+  and workflow-specific model groups.
 - Workflow and custom-node installation from a declarative JSON catalog.
 - Bounded, cancellable Git and pip operations so a stalled custom-node install cannot hang indefinitely.
 - Docker-warmed custom-node dependencies and prebuilt `dlib` for faster FaceAnalysis setup.
@@ -20,7 +22,7 @@ RunPod.
 
 The current catalog contains five production installers:
 
-- Krea 2 Extended (approximately 79.4 GB)
+- Krea 2 Extended (approximately 84.9 GB with every optional resource selected)
 - Image Edit (approximately 17.8 GB)
 - WAN Motion Control (approximately 45.4 GB)
 - Motion Control GOD Edition (approximately 61.3 GB)
@@ -159,6 +161,20 @@ and custom nodes:
   ]
 }
 ```
+
+Every file in a workflow is shown as a checkbox, grouped from its destination
+folder (diffusion models, LoRAs, VAEs, text encoders, upscale models and support
+resources). Existing entries are selected by default. Set
+`"default_selected": false` on a file only when it should be offered but not
+preselected. A resource belongs only to the workflow entries that contain it,
+so architecture-specific additions must be placed only in their compatible
+pipeline. Download URLs and authentication data remain server-side.
+
+Krea 2 Raw is available in the Krea tile but is intentionally not preselected.
+The four `simbo926/rmdl` LoRAs are hosted in a gated repository and therefore
+require `HF_TOKEN`. The Apache-2.0 NiceGirls and KNP resources are mirrored with
+upstream attribution at `simbo926/dsnn-krea2-resources`; other public additions
+continue to use their revision-pinned original sources.
 
 Set `update_comfyui` to `true` when a preset requires the newest ComfyUI code.
 Before downloading that preset, the launcher updates from

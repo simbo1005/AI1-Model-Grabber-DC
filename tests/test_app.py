@@ -31,6 +31,61 @@ def test_health_and_public_catalog() -> None:
         assert "files" not in workflows[0]
         assert "custom_nodes" not in workflows[0]
         assert "url" not in workflows[0]
+        assert workflows[0]["resources"]
+        raw = next(
+            resource
+            for resource in workflows[0]["resources"]
+            if resource["id"].endswith("krea2_raw_fp8_scaled.safetensors")
+        )
+        assert raw["selected_by_default"] is False
+        assert all(
+            resource["selected_by_default"]
+            for resource in workflows[0]["resources"]
+            if resource is not raw
+        )
+        assert all("url" not in resource for resource in workflows[0]["resources"])
+        assert all("auth" not in resource for resource in workflows[0]["resources"])
+
+
+def test_selected_resources_filter_files_and_model_links() -> None:
+    catalog = launcher_app.load_catalog()
+    workflow = next(
+        item for item in catalog["workflows"] if item["id"] == "krea-2-extended"
+    )
+    linked_source = workflow["model_links"][0]["source"]
+    other_resource = next(
+        item["destination"]
+        for item in workflow["files"]
+        if item["destination"] != linked_source
+    )
+
+    without_link = launcher_app.workflow_with_selected_resources(
+        workflow, [other_resource]
+    )
+    assert [item["destination"] for item in without_link["files"]] == [other_resource]
+    assert without_link["model_links"] == []
+
+    with_link = launcher_app.workflow_with_selected_resources(workflow, [linked_source])
+    assert [item["destination"] for item in with_link["files"]] == [linked_source]
+    assert all(item["source"] == linked_source for item in with_link["model_links"])
+
+    defaults = launcher_app.workflow_with_selected_resources(workflow, None)
+    default_destinations = {item["destination"] for item in defaults["files"]}
+    assert "models/diffusion_models/krea2_raw_fp8_scaled.safetensors" not in default_destinations
+    assert "models/loras/KNP_000003000.safetensors" in default_destinations
+    assert "models/loras/r0mdl_000002750.safetensors" in default_destinations
+
+
+def test_selected_resources_reject_unknown_resource() -> None:
+    workflow = launcher_app.load_catalog()["workflows"][0]
+    try:
+        launcher_app.workflow_with_selected_resources(
+            workflow, ["models/loras/not-in-this-pipeline.safetensors"]
+        )
+    except launcher_app.HTTPException as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("Unknown resources must be rejected")
 
 
 def test_catalog_contains_installers_but_no_product_workflows() -> None:
@@ -69,8 +124,8 @@ def test_krea_2_extended_installer_matches_the_multiflow_registry() -> None:
         item for item in catalog["workflows"] if item["id"] == "krea-2-extended"
     )
 
-    assert installer["estimated_size"] == "Approx. 79.4 GB"
-    assert sum(item["size_bytes"] for item in installer["files"]) == 79_406_568_471
+    assert installer["estimated_size"] == "Approx. 84.9 GB"
+    assert sum(item["size_bytes"] for item in installer["files"]) == 84_931_273_823
     assert [item["destination"] for item in installer["files"]] == [
         "models/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
         "models/diffusion_models/krea2_raw_fp8_scaled.safetensors",
@@ -81,6 +136,14 @@ def test_krea_2_extended_installer_matches_the_multiflow_registry() -> None:
         "models/loras/ass_v2_krea2_loraholic.safetensors",
         "models/loras/breast_size_v2_krea2_loraholic.safetensors",
         "models/loras/famegrid_spicy.safetensors",
+        "models/loras/nicegirls_krea2_000006000.safetensors",
+        "models/loras/realism_engine_krea2_v3.1.safetensors",
+        "models/loras/realism_engine_krea2_v2.safetensors",
+        "models/loras/r0mdl.safetensors",
+        "models/loras/r0mdl_000002250.safetensors",
+        "models/loras/r0mdl_000002500.safetensors",
+        "models/loras/r0mdl_000002750.safetensors",
+        "models/loras/KNP_000003000.safetensors",
         "models/upscale_models/4xNMKDSuperscale_4xNMKDSuperscale.pt",
         "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
         "models/vae/qwen_image_vae.safetensors",
@@ -112,6 +175,19 @@ def test_krea_2_extended_installer_matches_the_multiflow_registry() -> None:
         "models/loras/Krea_Amateur_V4.safetensors",
         "models/loras/krea-smartphone-photo-slider.safetensors",
     ]
+    raw = next(
+        item
+        for item in installer["files"]
+        if item["destination"].endswith("krea2_raw_fp8_scaled.safetensors")
+    )
+    assert raw["default_selected"] is False
+    gated_r0mdl = [
+        item
+        for item in installer["files"]
+        if item["destination"].startswith("models/loras/r0mdl")
+    ]
+    assert len(gated_r0mdl) == 4
+    assert all(item["auth"] == "huggingface" for item in gated_r0mdl)
     assert [item["name"] for item in installer["custom_nodes"]] == [
         "comfyui-krea2edit",
         "ComfyUI_Comfyroll_CustomNodes",
@@ -162,6 +238,44 @@ def test_krea_2_extended_installer_matches_the_multiflow_registry() -> None:
             ),
         },
     ]
+
+
+def test_image_edit_installer_matches_the_lazarus_face_swap_manifest() -> None:
+    catalog = launcher_app.load_catalog()
+    installer = next(
+        item for item in catalog["workflows"] if item["id"] == "image-edit"
+    )
+
+    assert installer["estimated_size"] == "Approx. 70.3 GB"
+    assert sum(item["size_bytes"] for item in installer["files"]) == 70_317_918_691
+    assert [item["destination"] for item in installer["files"]] == [
+        "models/diffusion_models/flux-2-klein-9b.safetensors",
+        "models/vae/flux2-vae.safetensors",
+        "models/text_encoders/qwen_3_8b_fp8mixed.safetensors",
+        "models/diffusion_models/krea2_turbo_bf16.safetensors",
+        "models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+        "models/vae/wan_2.1_vae.safetensors",
+        "models/text_encoders/qwen3.5_4b_bf16.safetensors",
+        "models/upscale_models/4xPurePhoto-Span.pth",
+        "models/upscale_models/1x-ITF-SkinDiffDetail-Lite-v1.pth",
+        "models/loras/Detailer-KREA2.safetensors",
+        "models/loras/RealisticSnapshotKrea2.safetensors",
+        "models/loras/Famegrid-Natural-V1-Krea-2.safetensors",
+        "models/loras/phone_photography_2020_krea2.safetensors",
+    ]
+
+
+def test_public_qwen_downloads_do_not_require_a_token() -> None:
+    catalog = launcher_app.load_catalog()
+    qwen_files = [
+        file_spec
+        for installer in catalog["workflows"]
+        for file_spec in installer["files"]
+        if file_spec["destination"].endswith("qwen_3_8b_fp8mixed.safetensors")
+    ]
+
+    assert qwen_files
+    assert all(file_spec["auth"] == "none" for file_spec in qwen_files)
 
 
 def test_motion_control_installer_matches_the_wan_manifest() -> None:
