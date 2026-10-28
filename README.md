@@ -20,13 +20,27 @@ RunPod.
 - A button that routes from the launcher to the matching RunPod ComfyUI proxy.
 - Optional launcher updates from GitHub at container startup.
 
-The current catalog contains five production installers:
+The current catalog contains six production installers:
 
 - Krea 2 Extended (approximately 84.9 GB with every optional resource selected)
 - Image Edit (approximately 17.8 GB)
 - WAN Motion Control (approximately 45.4 GB)
 - Motion Control GOD Edition (approximately 61.3 GB)
 - MiniMax H3 (approximately 63.4 GB)
+- KRQW2.1 (approximately 44.3 GB)
+
+KRQW2.1 installs REDGPT FP8, Krea 2 Turbo FP8, its Civitai LoRA, Qwen3-VL
+8B BF16 and 4B FP8 text encoders, Qwen Image 2.1 VAE BF16 and Krea 2 Real VAE.
+Its seven resources are selected by default in the expandable tile. Files already
+installed by another preset are verified and reused. The preset updates ComfyUI
+before setup and installs five pinned node packs: rgthree, Custom Scripts,
+SeedVR2 Video Upscaler, Easy Use and Regeneration Gate. The gate retains its
+upstream repository and node identifiers so existing KRQW2.1 workflows load.
+Set `CIVITAI_TOKEN` (or `CIVITAI_API_TOKEN`) on the pod for REDGPT and the Civitai
+LoRA; without it those two files are skipped with warnings. Hugging Face files
+continue to use the existing `hf download` path. This preset installs dependencies;
+it does not include the product workflow JSON. SeedVR2 can download its own
+upscaler weights when its node first runs; they are not among these seven files.
 
 The catalog installs only models, supporting files and custom nodes. Product
 workflow JSON files are deliberately not included.
