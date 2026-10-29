@@ -271,6 +271,26 @@ DEMO_DURATION_OVERRIDE=1 python -m uvicorn launcher.app:app --port 3000
 
 On Windows PowerShell, set environment variables with `$env:NAME="value"` first.
 
+## Impact Pack frontend compatibility
+
+Workflow setup and manual node repair apply a targeted compatibility fix to
+the pinned Impact Pack script (upstream issue #1244). It preserves restored
+switch inputs, captures the full stack for older frontend load paths, and uses
+the node-object connection API. It does not change model downloads or Python
+dependencies. Original JavaScript is retained as `impact-pack.js.dsnn-backup`,
+which ComfyUI does not load as an extension.
+
+To repair an already installed pack without reinstalling models, run the
+standard-library-only `launcher/impact_compat.py` with the ComfyUI directory or
+the Impact Pack repository directory as its argument. Then hard-refresh the
+browser and reopen the original workflow JSON; a backend restart is not required.
+Do not overwrite the original workflow with a partially loaded graph.
+
+The isolated JavaScript regression harness accepts the repaired upstream script:
+`node tests/impact_frontend_regression.cjs /path/to/impact-pack.js`. It exercises
+repeated workflow restores, deep stacks, dynamic inputs, manual connections and
+inverse-switch output preservation without a GPU.
+
 ## Build manually
 
 ```text
