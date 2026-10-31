@@ -67,6 +67,13 @@ result. Failed installs, missing registrations and failed restarts produce an
 error instead of a ready message. Transient network failures receive one retry.
 The existing HF CLI transfer path is unchanged.
 
+Krea 2 Extended uses the original CRT-Nodes 2.2.0 pin
+(`7e277170b525a07fc4a9b6fd1e87ee00ec9628e4`), also used by Motion Control
+GOD Edition. CRT 2.18.0 imports MiniMax H3 core modules during package startup
+and cannot load on the older stock RunPod ComfyUI. This rollback does not
+upgrade ComfyUI or change model downloads; rerunning setup selects the older
+CRT checkout and restarts ComfyUI for registration verification.
+
 The initial setup waits for ComfyUI and its configured Python environment.
 `COMFYUI_READY_TIMEOUT` defaults to 600 seconds; `COMFYUI_RESTART_TIMEOUT`
 defaults to 300 seconds to allow custom-node imports on the first restart.

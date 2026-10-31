@@ -1,5 +1,5 @@
 {
-  "version": 19,
+  "version": 20,
   "workflows": [
     {
       "id": "krea-2-extended",
@@ -456,7 +456,7 @@
         {
           "name": "CRT-Nodes",
           "repo": "https://github.com/PGCRT/CRT-Nodes.git",
-          "ref": "95de8cd9181bae5aa966f2c3c8ae28d38b7f263e",
+          "ref": "7e277170b525a07fc4a9b6fd1e87ee00ec9628e4",
           "install_requirements": true
         },
         {

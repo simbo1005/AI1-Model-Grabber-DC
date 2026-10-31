@@ -1,5 +1,6 @@
 """Shared Vast features with RunPod's own service addresses and transfer path."""
 import importlib
+import json
 import os
 from pathlib import Path
 
@@ -7,6 +8,19 @@ from fastapi.testclient import TestClient
 import pytest
 
 launcher = importlib.import_module("launcher.app")
+
+
+def test_krea_restores_original_crt_pin_without_upgrading_comfyui():
+    root = Path(__file__).resolve().parents[1]
+    catalog = json.loads((root / "catalog/workflows.json").read_text())
+    workflows = {item["id"]: item for item in catalog["workflows"]}
+    original_pin = "7e277170b525a07fc4a9b6fd1e87ee00ec9628e4"
+    for workflow_id in ("krea-2-extended", "motion-control-god-edition"):
+        crt = next(node for node in workflows[workflow_id]["custom_nodes"]
+                   if node["name"] == "CRT-Nodes")
+        assert crt["ref"] == original_pin
+        assert crt["install_requirements"] is True
+    assert not workflows["krea-2-extended"].get("update_comfyui", False)
 
 
 def test_public_image_never_embeds_huggingface_credentials():
