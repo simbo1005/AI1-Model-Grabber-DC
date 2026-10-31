@@ -17,7 +17,7 @@ RunPod.
 - Docker-warmed custom-node dependencies and prebuilt `dlib` for faster FaceAnalysis setup.
 - Redacted timing diagnostics at `/api/diagnostics/report` for support and troubleshooting.
 - A Custom Models queue for direct downloads into any ComfyUI model folder.
-- A button that routes from the launcher to the matching RunPod ComfyUI proxy.
+- Permanent ComfyUI and JupyterLab header links using the matching RunPod proxies.
 - Optional launcher updates from GitHub at container startup.
 
 The current catalog contains six production installers:
@@ -119,7 +119,7 @@ Neither endpoint includes download URLs, filesystem paths or credentials.
 Use:
 
 ```text
-Container image: sdcioba/comfyui-workflow-launcher:2.1
+Container image: sdcioba/comfyui-workflow-launcher:2.3
 HTTP ports:      3000, 8188, 8888
 Container disk:  at least 100 GB for the largest individual installer
 ```
@@ -134,11 +134,30 @@ https://POD_ID-8888.proxy.runpod.net
 ```
 
 Set `JUPYTER_PASSWORD` in the RunPod template before exposing JupyterLab.
+The header links use the pod's `8188` and `8888` HTTPS proxy addresses; override
+them with `COMFYUI_PUBLIC_URL` and `JUPYTER_PUBLIC_URL` for custom domains.
+
+### RunPod/Vast parity (2.3)
+
+The RunPod catalog, pinned node setup, SeedVR2 compatibility checks and Impact
+Pack frontend repair match the Vast grabber. RunPod retains its stock base image,
+ComfyUI directory and proxy URL conventions; Vast's portal and supervisor are
+not copied over.
+
+HF downloads still run through the existing `hf download` CLI command. As on
+Vast, its child process now enables `HF_XET_HIGH_PERFORMANCE=1`, removes
+`HF_HUB_DISABLE_XET`, and defaults `HF_XET_NUM_CONCURRENT_RANGE_GETS` to `32`.
+An explicit `HF_XET_NUM_CONCURRENT_RANGE_GETS` in the template is preserved.
+`LAUNCHER_HF_XET_RANGE_GETS` supplies an alternative default. These settings do
+not guarantee a specific network speed or change model versions/quantizations.
+Published images carry the source Git commit in their OCI revision label.
+
 Set `HF_TOKEN` when using Image Edit, and make sure the
 token's account has accepted the applicable Hugging Face model licenses.
-Images published by the project's GitHub Actions workflow can instead include
-the dedicated `HF_TOKEN` repository secret as a baked download
-credential. A runtime `HF_TOKEN` always takes precedence over the baked file.
+Version 2.3 and later never embed a Hugging Face token in the image. Supply
+`HF_TOKEN` in the RunPod template's environment variables. An optional read-only
+token file mounted at `HF_TOKEN_FILE` is also supported; the environment takes
+precedence. GitHub Actions needs only `DOCKERHUB_TOKEN` to publish the image.
 
 ## Remote UI updates
 
@@ -239,12 +258,11 @@ Do not treat a token supplied to a user-controlled pod as secret. A person with
 Jupyter, SSH or container access can inspect the environment, filesystem and
 running processes. Never commit tokens to GitHub.
 
-The automated publishing workflow can deliberately place the dedicated,
-fine-grained `HF_TOKEN` Actions secret in the final image so public
-template users do not need to configure Hugging Face themselves. This keeps the
-credential out of source control and build logs, but it does not make the token
-secret from anyone who can pull or inspect the final image. Treat that token as
-public, narrowly scoped and disposable.
+The 2.3 publishing workflow does not read the GitHub `HF_TOKEN` secret and never
+places provider credentials in the final image. Older published images may
+contain the previously embedded download credential. Revoke/rotate that token:
+publishing a clean image cannot remove credentials from old downloadable layers.
+Use a new, fine-grained read token in your own RunPod template.
 
 For production gated models, prefer one of:
 

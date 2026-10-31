@@ -19,6 +19,8 @@ const elements = {
   cancel: document.querySelector("#cancel-button"),
   restart: document.querySelector("#restart-button"),
   comfy: document.querySelector("#comfy-button"),
+  serviceComfy: document.querySelector("#service-comfy-button"),
+  serviceJupyter: document.querySelector("#service-jupyter-button"),
   modelDraftList: document.querySelector("#model-draft-list"),
   modelQueueList: document.querySelector("#model-queue-list"),
   customQueueState: document.querySelector("#custom-queue-state"),
@@ -74,6 +76,21 @@ function comfyUrl(serverUrl) {
     return `https://${proxyMatch[1]}-8188.proxy.runpod.net`;
   }
   return `${window.location.protocol}//${host}:8188`;
+}
+
+function jupyterUrl(serverUrl) {
+  if (serverUrl) return serverUrl;
+  const host = window.location.hostname;
+  const proxyMatch = host.match(/^(.+)-\d+\.proxy\.runpod\.net$/);
+  if (proxyMatch) {
+    return `https://${proxyMatch[1]}-8888.proxy.runpod.net`;
+  }
+  return `${window.location.protocol}//${host}:8888`;
+}
+
+function updateServiceLinks(status) {
+  elements.serviceComfy.href = comfyUrl(status.comfy_url);
+  elements.serviceJupyter.href = jupyterUrl(status.jupyter_url);
 }
 
 function selectView(viewName, updateHash = true) {
@@ -316,6 +333,7 @@ function showImmediateError(message) {
 }
 
 function updatePanel(status) {
+  updateServiceLinks(status);
   const percent = Math.max(0, Math.min(100, Number(status.percent || 0)));
   const isComplete = status.status === "complete";
   const isError = status.status === "error";
@@ -396,6 +414,7 @@ function setRestartButtonsBusy(isBusy) {
 async function refreshAfterComfyRestart() {
   try {
     const status = await fetchJson("/api/status");
+    updateServiceLinks(status);
     if (status.status !== "idle") updatePanel(status);
   } catch {
     // The workflow status is optional on the custom-nodes page.
@@ -838,6 +857,7 @@ async function initialise() {
 
   try {
     const status = await fetchJson("/api/status");
+    updateServiceLinks(status);
     if (status.status !== "idle") {
       activeWorkflowId = status.workflow_id;
       updatePanel(status);

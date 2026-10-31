@@ -550,7 +550,7 @@ def test_unknown_workflow_cannot_start() -> None:
         assert response.status_code == 404
 
 
-def test_huggingface_auth_can_use_baked_token_file(
+def test_huggingface_auth_can_use_runtime_token_file(
     tmp_path,
     monkeypatch,
 ) -> None:

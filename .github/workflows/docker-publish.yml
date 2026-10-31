@@ -6,7 +6,7 @@ on:
       tag:
         description: Docker image tag
         required: true
-        default: "2.2-test"
+        default: "2.3"
       publish_latest:
         description: Also update the latest tag
         required: true
@@ -38,6 +38,17 @@ jobs:
 
       - name: Audit custom-node requirements
         run: python scripts/audit_node_requirements.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check frontend and RunPod links
+        run: |
+          node --check launcher/static/app.js
+          node --test tests/runpod_service_links.cjs
+          bash -n docker/entrypoint.sh
 
       - name: Free runner disk space
         run: |
@@ -73,9 +84,6 @@ jobs:
             ${{ inputs.publish_latest && format('{0}:latest', env.IMAGE_NAME) || '' }}
           build-args: |
             IMAGE_VERSION=${{ inputs.tag }}
-            HF_TOKEN_REVISION=${{ github.run_id }}-${{ github.run_attempt }}
-            REQUIRE_HF_DOWNLOAD_TOKEN=1
-          secrets: |
-            hf_download_token=${{ secrets.HF_TOKEN }}
+            SOURCE_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=min

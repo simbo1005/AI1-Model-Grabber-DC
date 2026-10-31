@@ -135,6 +135,7 @@ class JobState:
     warnings: list[str] = field(default_factory=list)
     node_checks: list[dict[str, Any]] = field(default_factory=list)
     comfy_url: str = ""
+    jupyter_url: str = ""
     restart_required: bool = False
     comfy_restarted: bool = False
     started_at: str | None = None
@@ -554,6 +555,16 @@ def comfy_public_url() -> str:
     return ""
 
 
+def jupyter_public_url() -> str:
+    explicit = os.getenv("JUPYTER_PUBLIC_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    pod_id = os.getenv("RUNPOD_POD_ID", "").strip()
+    if pod_id:
+        return f"https://{pod_id}-8888.proxy.runpod.net"
+    return ""
+
+
 def safe_destination(relative_path: str) -> Path:
     if not relative_path or Path(relative_path).is_absolute():
         raise RuntimeError("A download destination must be relative to the ComfyUI directory.")
@@ -578,6 +589,25 @@ def huggingface_token() -> str:
         return token_file.read_text(encoding="utf-8").strip()
     except (FileNotFoundError, OSError):
         return ""
+
+
+def hf_download_environment(*, requires_token: bool) -> dict[str, str]:
+    """Match the Vast launcher's HF CLI/Xet environment; no token in argv."""
+    environment = os.environ.copy()
+    token = huggingface_token()
+    if requires_token and not token:
+        raise RuntimeError("This file requires Hugging Face access.")
+    if token:
+        environment["HF_TOKEN"] = token
+    # Startup can update this code without rebuilding the image, so apply the
+    # same defaults here as in Vast instead of relying on baked ENV alone.
+    environment["HF_XET_HIGH_PERFORMANCE"] = "1"
+    environment.pop("HF_HUB_DISABLE_XET", None)
+    environment.setdefault(
+        "HF_XET_NUM_CONCURRENT_RANGE_GETS",
+        os.getenv("LAUNCHER_HF_XET_RANGE_GETS", "32"),
+    )
+    return environment
 
 
 def tokenized_request(file_spec: dict[str, Any]) -> tuple[str, dict[str, str]]:
@@ -1272,7 +1302,7 @@ class ComfyServiceController:
 
 class JobController:
     def __init__(self) -> None:
-        self.state = JobState(comfy_url=comfy_public_url())
+        self.state = JobState(comfy_url=comfy_public_url(), jupyter_url=jupyter_public_url())
         self.task: asyncio.Task[None] | None = None
         self.cancel_event = asyncio.Event()
         self.lock = asyncio.Lock()
@@ -1304,6 +1334,7 @@ class JobController:
                 stage="preparing",
                 message="Preparing workflow…",
                 comfy_url=comfy_public_url(),
+                jupyter_url=jupyter_public_url(),
                 started_at=utc_now(),
             )
             self.task = asyncio.create_task(self._run(workflow))
@@ -1807,15 +1838,10 @@ class JobController:
         staging_dir.mkdir(parents=True, exist_ok=True)
         if not shutil.which("hf"):
             raise RuntimeError("The Hugging Face 'hf' CLI is missing from this image.")
-        environment = os.environ.copy()
-        token = huggingface_token()
-        if requires_token and not token:
-            raise RuntimeError(f"{name} requires Hugging Face access.")
-        # Send the configured token for public downloads as well. Besides making
-        # gated downloads work, this gives the Hub the same authenticated request
-        # context as an `hf auth login` CLI session without exposing it in argv.
-        if token:
-            environment["HF_TOKEN"] = token
+        try:
+            environment = hf_download_environment(requires_token=requires_token)
+        except RuntimeError:
+            raise RuntimeError(f"{name} requires Hugging Face access.") from None
         started = time.monotonic()
         started_at_ns = time.time_ns()
         self.update(
