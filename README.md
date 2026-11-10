@@ -2,11 +2,13 @@
 
 ## SNN KRAST pipeline
 
-A separate **SNN KRAST** tile installs the original BF16 workflow stack from
-Hugging Face, including `simbo926/KrastRaw` (dataset), its four LoRAs, vision
-models and masking resources. All 15 resources are checked by default and use
-the existing high-performance HF CLI path. The original sampler and every
-required node are installed and verified. [Setup and workflow instructions](docs/snn-krast.md).
+The **SNN KRAST** tile installs the original image-generation stack plus the
+FaceSwap/SeedVR2 workflow resources: **41 default-selected files, about 101 GB**.
+39 resources use the existing fast HF CLI path; RedQW and its companion LoRA
+use their verified Civitai sources. Set `HF_TOKEN` and `CIVITAI_TOKEN` in your
+template. The installer checks all 62 workflow node types, enables the baked
+SageAttention 2 backend and runs automatic scratch warmup jobs. Your uploaded
+workflow is unchanged. [Setup and workflow instructions](docs/snn-krast.md).
 
 A lightweight, single-page workflow launcher that runs next to stock ComfyUI on
 RunPod.
@@ -134,9 +136,9 @@ Neither endpoint includes download URLs, filesystem paths or credentials.
 Use:
 
 ```text
-Container image: sdcioba/comfyui-workflow-launcher:2.3
+Container image: sdcioba/comfyui-workflow-launcher:2.4-test
 HTTP ports:      3000, 8188, 8888
-Container disk:  at least 100 GB for the largest individual installer
+Container disk:  at least 150 GB for the full SNN KRAST selection and working space
 ```
 
 No persistent volume is required. The public service URLs follow RunPod's normal
@@ -327,8 +329,8 @@ inverse-switch output preservation without a GPU.
 ## Build manually
 
 ```text
-docker build -t sdcioba/comfyui-workflow-launcher:2.1 .
-docker push sdcioba/comfyui-workflow-launcher:2.1
+docker build --platform linux/amd64 -t sdcioba/comfyui-workflow-launcher:2.4-test .
+docker push sdcioba/comfyui-workflow-launcher:2.4-test
 ```
 
 Alternatively, run the included GitHub Actions workflow after adding repository
