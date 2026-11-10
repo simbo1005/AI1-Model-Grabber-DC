@@ -7,6 +7,10 @@ on:
         description: Docker image tag
         required: true
         default: "2.4-test"
+      runtime_base:
+        description: Optional immutable image from this same repository for launcher-only updates
+        required: false
+        default: ""
       publish_latest:
         description: Also update the latest tag
         required: true
@@ -26,6 +30,19 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate immutable native base
+        if: ${{ inputs.runtime_base != '' }}
+        env:
+          RUNTIME_BASE: ${{ inputs.runtime_base }}
+          EXPECTED_IMAGE: sdcioba/comfyui-workflow-launcher
+        run: |
+          python3 - <<'PYCODE'
+          import os, re
+          expected = re.escape(os.environ["EXPECTED_IMAGE"])
+          if not re.fullmatch(expected+r"@sha256:[0-9a-f]{64}", os.environ["RUNTIME_BASE"]):
+              raise SystemExit("runtime_base must pin an image digest from this repository")
+          PYCODE
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,6 +69,7 @@ jobs:
           bash -n docker/entrypoint.sh
 
       - name: Free runner disk space
+        if: ${{ inputs.runtime_base == '' }}
         run: |
           echo "Disk space before cleanup:"
           df -h /
@@ -78,6 +96,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ inputs.runtime_base != '' && 'docker/Dockerfile.runtime' || 'Dockerfile' }}
           platforms: linux/amd64
           push: true
           tags: |
@@ -86,5 +105,6 @@ jobs:
           build-args: |
             IMAGE_VERSION=${{ inputs.tag }}
             SOURCE_REVISION=${{ github.sha }}
+            BASE_IMAGE=${{ inputs.runtime_base }}
           cache-from: type=gha
           cache-to: type=gha,mode=min
