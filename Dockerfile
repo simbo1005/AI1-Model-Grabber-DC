@@ -71,6 +71,12 @@ RUN set -eu; \
     if [ "$added_toolchain" = 1 ]; then apt-get purge -y build-essential && apt-get autoremove -y; fi; \
     rm -rf /var/lib/apt/lists/*
 
+# Bake SageAttention 2 CUDA extensions for Ampere, Ada, Hopper and Blackwell.
+# Startup uses this local wheel; no compiler or internet install on a rented GPU.
+COPY docker/attention/ /opt/dsnn-attention/
+RUN python3.12 /opt/dsnn-attention/build.py \
+    && python3.12 /opt/dsnn-attention/patch_startup.py runpod
+
 COPY launcher/ /opt/dsnn/launcher/
 COPY catalog/ /opt/dsnn/catalog/
 COPY docker/entrypoint.sh /start.sh

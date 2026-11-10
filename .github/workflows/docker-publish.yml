@@ -6,7 +6,7 @@ on:
       tag:
         description: Docker image tag
         required: true
-        default: "2.3"
+        default: "2.4-test"
       publish_latest:
         description: Also update the latest tag
         required: true
@@ -22,6 +22,7 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
