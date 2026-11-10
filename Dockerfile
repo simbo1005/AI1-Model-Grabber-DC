@@ -73,9 +73,10 @@ RUN set -eu; \
 
 # Bake SageAttention 2 CUDA extensions for Ampere, Ada, Hopper and Blackwell.
 # Startup uses this local wheel; no compiler or internet install on a rented GPU.
-COPY docker/attention/ /opt/dsnn-attention/
-RUN python3.12 /opt/dsnn-attention/build.py \
-    && python3.12 /opt/dsnn-attention/patch_startup.py runpod
+COPY docker/attention/build.py /opt/dsnn-attention/build.py
+RUN python3.12 /opt/dsnn-attention/build.py
+COPY docker/attention/launch.py docker/attention/patch_startup.py /opt/dsnn-attention/
+RUN python3.12 /opt/dsnn-attention/patch_startup.py runpod
 
 COPY launcher/ /opt/dsnn/launcher/
 COPY catalog/ /opt/dsnn/catalog/
