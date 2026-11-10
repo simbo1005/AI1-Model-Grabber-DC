@@ -1,16 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
 ARG RUNPOD_COMFY_IMAGE=runpod/comfyui@sha256:7078f94dbe28d079c487c245dc3524443e2c6225a6208a1fff8c7a652c1b3a40
-FROM ${RUNPOD_COMFY_IMAGE}
+FROM ${RUNPOD_COMFY_IMAGE} AS sage-native
 
-ARG IMAGE_VERSION=dev
-ARG SOURCE_REVISION=unknown
-
-LABEL org.opencontainers.image.title="dsnn ComfyUI Workflow Launcher" \
-      org.opencontainers.image.description="Stock RunPod ComfyUI plus the remotely updateable dsnn Model Grabber" \
-      org.opencontainers.image.source="https://github.com/simbo1005/AI1-Model-Grabber-DC" \
-      org.opencontainers.image.version="${IMAGE_VERSION}" \
-      org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 USER root
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -75,8 +67,12 @@ RUN set -eu; \
 # Startup uses this local wheel; no compiler or internet install on a rented GPU.
 COPY docker/attention/build.py /opt/dsnn-attention/build.py
 RUN python3.12 /opt/dsnn-attention/build.py
-COPY docker/attention/launch.py docker/attention/patch_startup.py /opt/dsnn-attention/
-RUN python3.12 /opt/dsnn-attention/patch_startup.py runpod
+# Commit compilation separately from import/startup checks.
+FROM sage-native AS runtime
+
+COPY docker/attention/check.py docker/attention/launch.py docker/attention/patch_startup.py /opt/dsnn-attention/
+RUN python3.12 /opt/dsnn-attention/check.py \
+    && python3.12 /opt/dsnn-attention/patch_startup.py runpod
 
 COPY launcher/ /opt/dsnn/launcher/
 COPY catalog/ /opt/dsnn/catalog/
@@ -86,6 +82,16 @@ RUN chmod +x /start.sh \
 # Provider credentials are supplied only at runtime, never copied into layers.
 
 WORKDIR /workspace/runpod-slim
+
+# Version metadata follows compilation so a source/tag change can reuse native layers.
+ARG IMAGE_VERSION=dev
+ARG SOURCE_REVISION=unknown
+
+LABEL org.opencontainers.image.title="dsnn ComfyUI Workflow Launcher" \
+      org.opencontainers.image.description="Stock RunPod ComfyUI plus the remotely updateable dsnn Model Grabber" \
+      org.opencontainers.image.source="https://github.com/simbo1005/AI1-Model-Grabber-DC" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
 
 EXPOSE 3000 8188 8888
 
