@@ -74,6 +74,12 @@ COPY docker/attention/check.py docker/attention/launch.py docker/attention/patch
 RUN python3.12 /opt/dsnn-attention/check.py \
     && python3.12 /opt/dsnn-attention/patch_startup.py runpod
 
+# Civitai transfers use parallel ranges; keep this after the native build cache.
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends aria2 \
+    && aria2c --version \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY launcher/ /opt/dsnn/launcher/
 COPY catalog/ /opt/dsnn/catalog/
 COPY docker/entrypoint.sh /start.sh
