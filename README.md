@@ -336,3 +336,7 @@ docker push sdcioba/comfyui-workflow-launcher:2.4-test
 Alternatively, run the included GitHub Actions workflow after adding repository
 secret named `DOCKERHUB_TOKEN`. Test builds publish only the requested tag;
 select `publish_latest` only when promoting a tested release.
+
+## November upstream preview
+
+See [the integration notes](docs/upstream-2026-11-16.md) for the new tiles, isolated CUDA 13 runtime, preserved DSNN features and preview image tags.

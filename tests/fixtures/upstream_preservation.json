@@ -1,0 +1,42 @@
+{
+  "baseline": "2b1ab9939c269830f2f17fe7c35cbc2ff0210d83",
+  "workflows": {
+    "krea-2-extended": {
+      "sha256": "8e3682d801930e82c7d4f597546dd1334e459fd93c00be7744b034a20879e54b",
+      "files": 41
+    },
+    "image-edit": {
+      "sha256": "49a3a2dfc3a69ac1876f3e37d86426df3197e387dca8de484fe14348f054bce7",
+      "files": 13
+    },
+    "motion-control": {
+      "sha256": "844c2b87f8e8d922b588cc3895aa42f376a674e41ad2b9b380de106af24e0dc3",
+      "files": 9
+    },
+    "motion-control-god-edition": {
+      "sha256": "85db59b43703d4567410602a4fafa48338ba4b1e3994447ac00ad25eedbe2b6f",
+      "files": 14
+    },
+    "minimax-h3": {
+      "sha256": "14be566b03d61dcc0cebe1202b2159191b1b4a94252ad93766122ba5e59fe736",
+      "files": 5
+    },
+    "krqw2-1": {
+      "sha256": "8b4a02e1900a81d2e58f112477e7ac2e89e24e022872cb7d1bbde6285faa3b12",
+      "files": 7
+    },
+    "snn-krast": {
+      "sha256": "43787ffc24b3252be340deb2659542886dfaf28ef6302ca0708c707796e2cb3c",
+      "files": 41
+    }
+  },
+  "download_functions": {
+    "hf_download_environment": "b63cf5b82eb793ebfa3023880a16d8648abbf48d411f5c156788d1000cde4f8c",
+    "hf_download_command": "d2f81036ce9b03838169b4fd1513773ffeddc6420bc57835c8e91274b263d599",
+    "xet_incomplete_bytes": "b1c5496a5d08f1a48b35b7f3044fff1543d58b9e34c004c5fcef0c8d1dc9b2d6",
+    "rolling_transfer_rate": "901cb373439595f2ce9958f2e553056bc666c1ae9b8769e3f43950ffbbb4d018",
+    "_download_file_with_hf_cli": "7259044ae4465d140484d2dabcb6ccfc56c7e2f4961fc88e467ff68132c154db",
+    "_download_file_with_aria2": "547981d9e82d860aa6b1f0453ab2cde0d772984a43183b88ca52cd0b7e7ed73f"
+  },
+  "civitai_sha256": "259085dcd3737871073ee959c5b86691ed6d6ee68fa3d0e7017d4613464fd65f"
+}
